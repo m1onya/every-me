@@ -1,0 +1,348 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+
+const MONTHS_JA = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+const DAYS_JA = ["日","月","火","水","木","金","土"];
+
+const today = new Date();
+const todayKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+
+function dateKey(year, month, day) {
+  return `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+}
+function getDaysInMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+function getFirstDayOfMonth(year, month) {
+  return new Date(year, month, 1).getDay();
+}
+
+// Simple localStorage storage helper
+const store = {
+  getAll() {
+    const result = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key.startsWith("diary:")) {
+        try { result[key.replace("diary:", "")] = JSON.parse(localStorage.getItem(key)); } catch {}
+      }
+    }
+    return result;
+  },
+  set(dateStr, value) {
+    localStorage.setItem(`diary:${dateStr}`, JSON.stringify(value));
+  }
+};
+
+export default function DiaryApp() {
+  const [entries, setEntries] = useState({});
+  const [view, setView] = useState("grid");
+  const [selectedDate, setSelectedDate] = useState(todayKey);
+  const [currentYear, setCurrentYear] = useState(today.getFullYear());
+  const [currentMonth, setCurrentMonth] = useState(today.getMonth());
+  const [draftPhoto, setDraftPhoto] = useState(null);
+  const [draftComment, setDraftComment] = useState("");
+  const [shareToast, setShareToast] = useState(false);
+  const fileRef = useRef();
+
+  useEffect(() => {
+    setEntries(store.getAll());
+  }, []);
+
+  const saveEntry = useCallback((dateStr, photo, comment) => {
+    const entry = { photo, comment, savedAt: new Date().toISOString() };
+    store.set(dateStr, entry);
+    setEntries(prev => ({ ...prev, [dateStr]: entry }));
+  }, []);
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setDraftPhoto(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleSave = () => {
+    if (!draftPhoto) return;
+    saveEntry(selectedDate, draftPhoto, draftComment);
+    setDraftPhoto(null);
+    setDraftComment("");
+    setView("entry");
+  };
+
+  const openDay = (dateStr) => {
+    setSelectedDate(dateStr);
+    const d = new Date(dateStr);
+    const t = new Date(todayKey);
+    if (entries[dateStr]) {
+      setView("entry");
+    } else if (d <= t) {
+      setDraftPhoto(null);
+      setDraftComment("");
+      setView("new");
+    }
+  };
+
+  const handleShare = () => {
+    const entry = entries[selectedDate];
+    if (!entry) return;
+    const text = `${selectedDate}の私 📸\n"${entry.comment || "今日も素敵な一日"}"\n#毎日の私 #365diary #everyMe`;
+    if (navigator.share) {
+      navigator.share({ title: "every me ✦", text }).catch(() => {});
+    } else {
+      navigator.clipboard.writeText(text).then(() => {
+        setShareToast(true);
+        setTimeout(() => setShareToast(false), 2500);
+      });
+    }
+  };
+
+  const daysInMonth = getDaysInMonth(currentYear, currentMonth);
+  const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
+  const prevMonth = () => {
+    if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y-1); }
+    else setCurrentMonth(m => m-1);
+  };
+  const nextMonth = () => {
+    if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y+1); }
+    else setCurrentMonth(m => m+1);
+  };
+
+  const entryForSelected = entries[selectedDate];
+  const formatDisplayDate = (dateStr) => {
+    const [y, m, d] = dateStr.split("-");
+    const dow = new Date(dateStr).getDay();
+    return `${y}年 ${parseInt(m)}月${parseInt(d)}日（${DAYS_JA[dow]}）`;
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "linear-gradient(135deg, #fdf6f0 0%, #fce8e8 40%, #f5e6f8 100%)",
+      fontFamily: "'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif",
+      position: "relative", overflow: "hidden",
+    }}>
+      <div style={{ position:"fixed", inset:0, pointerEvents:"none", zIndex:0,
+        backgroundImage:"url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E\")",
+        backgroundRepeat:"repeat", backgroundSize:"180px", opacity:0.5 }} />
+
+      {[
+        { size:320, top:-80, left:-80, color:"rgba(255,182,193,0.18)" },
+        { size:200, bottom:100, right:-60, color:"rgba(216,180,254,0.2)" },
+        { size:140, top:"40%", right:40, color:"rgba(254,215,170,0.22)" },
+      ].map((c,i) => (
+        <div key={i} style={{ position:"fixed", borderRadius:"50%", width:c.size, height:c.size,
+          top:c.top, bottom:c.bottom, left:c.left, right:c.right,
+          background:c.color, pointerEvents:"none", zIndex:0, filter:"blur(40px)" }} />
+      ))}
+
+      <div style={{ position:"relative", zIndex:1, maxWidth:430, margin:"0 auto", padding:"0 0 80px" }}>
+
+        {/* Header */}
+        <div style={{ textAlign:"center", padding:"36px 20px 16px", borderBottom:"1px solid rgba(200,160,160,0.15)" }}>
+          <div style={{ fontSize:11, letterSpacing:"0.35em", color:"#c9a0a0", textTransform:"uppercase", marginBottom:6, fontWeight:600 }}>my 365 days</div>
+          <h1 style={{ margin:0, fontSize:32, fontWeight:800,
+            background:"linear-gradient(135deg, #e8758a 0%, #c97bb5 60%, #9b7fd4 100%)",
+            WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent",
+            letterSpacing:"-0.02em", lineHeight:1.1 }}>every me ✦</h1>
+          <div style={{ fontSize:11, color:"#c9a0a0", marginTop:6, letterSpacing:"0.1em" }}>一瞬の私を、365日分。</div>
+        </div>
+
+        {/* GRID VIEW */}
+        {view === "grid" && (
+          <div style={{ padding:"20px 16px" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18 }}>
+              <button onClick={prevMonth} style={navBtnStyle}>‹</button>
+              <div style={{ fontSize:17, fontWeight:700, color:"#9b6e8a", letterSpacing:"0.05em" }}>
+                {currentYear}年 {MONTHS_JA[currentMonth]}
+              </div>
+              <button onClick={nextMonth} style={navBtnStyle}>›</button>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 1fr)", gap:4, marginBottom:4 }}>
+              {DAYS_JA.map((d,i) => (
+                <div key={d} style={{ textAlign:"center", fontSize:10, fontWeight:700,
+                  color: i===0?"#e88": i===6?"#88b":"#bba0a0", padding:"4px 0" }}>{d}</div>
+              ))}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 1fr)", gap:5 }}>
+              {Array.from({length:firstDay}).map((_,i) => <div key={`e${i}`} />)}
+              {Array.from({length:daysInMonth}).map((_,i) => {
+                const day = i+1;
+                const dk = dateKey(currentYear, currentMonth, day);
+                const entry = entries[dk];
+                const isToday = dk === todayKey;
+                const isFuture = new Date(dk) > new Date(todayKey);
+                return (
+                  <button key={dk} onClick={() => !isFuture && openDay(dk)} style={{
+                    aspectRatio:"1", borderRadius:10, overflow:"hidden", position:"relative",
+                    border: isToday?"2.5px solid #e8758a":"2px solid rgba(200,160,160,0.18)",
+                    cursor: isFuture?"default":"pointer",
+                    background: entry?"transparent": isFuture?"rgba(240,235,250,0.3)":"rgba(255,240,245,0.6)",
+                    padding:0, transition:"transform 0.15s, box-shadow 0.15s",
+                    boxShadow: isToday?"0 0 0 4px rgba(232,117,138,0.15)":"0 1px 4px rgba(180,140,160,0.1)",
+                  }}
+                    onMouseEnter={e => { if(!isFuture) e.currentTarget.style.transform="scale(1.06)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.transform="scale(1)"; }}
+                  >
+                    {entry?.photo && <img src={entry.photo} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />}
+                    <div style={{ position:"absolute", inset:0, display:"flex",
+                      alignItems: entry?.photo?"flex-end":"center", justifyContent:"center",
+                      background: entry?.photo?"linear-gradient(transparent 50%, rgba(0,0,0,0.35))":"none", padding:2 }}>
+                      <span style={{ fontSize:entry?.photo?8:11, fontWeight:700,
+                        color: entry?.photo?"#fff": isFuture?"#d0c0d0":"#c9a0b0", lineHeight:1 }}>{day}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Stats */}
+            <div style={{ marginTop:20, padding:"14px 18px", background:"rgba(255,255,255,0.6)", borderRadius:16,
+              backdropFilter:"blur(10px)", border:"1px solid rgba(220,180,200,0.2)",
+              display:"flex", justifyContent:"space-around", alignItems:"center" }}>
+              {[
+                { label:"記録した日", value:Object.keys(entries).length, unit:"日" },
+                { label:"今年の記録", value:Object.keys(entries).filter(k=>k.startsWith(String(today.getFullYear()))).length, unit:"枚" },
+                { label:"1年の達成率", value:Math.floor(Object.keys(entries).length/365*100), unit:"%" },
+              ].map(s => (
+                <div key={s.label} style={{ textAlign:"center" }}>
+                  <div style={{ fontSize:24, fontWeight:800, color:"#c97bb5", lineHeight:1 }}>
+                    {s.value}<span style={{ fontSize:13, marginLeft:1 }}>{s.unit}</span>
+                  </div>
+                  <div style={{ fontSize:10, color:"#c9a0a0", marginTop:3 }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ENTRY VIEW */}
+        {view === "entry" && entryForSelected && (
+          <div style={{ padding:"20px 16px" }}>
+            <button onClick={() => setView("grid")} style={backBtnStyle}>← カレンダー</button>
+            <div style={{ fontSize:13, color:"#c9a0b0", textAlign:"center", marginBottom:16, letterSpacing:"0.08em" }}>
+              {formatDisplayDate(selectedDate)}
+            </div>
+            <div style={{ background:"#fff", borderRadius:4, padding:"12px 12px 20px",
+              boxShadow:"0 8px 32px rgba(180,120,160,0.18), 0 2px 8px rgba(0,0,0,0.08)",
+              transform:"rotate(-0.8deg)", margin:"0 auto", maxWidth:320, transition:"transform 0.3s" }}
+              onMouseEnter={e => e.currentTarget.style.transform="rotate(0deg) scale(1.01)"}
+              onMouseLeave={e => e.currentTarget.style.transform="rotate(-0.8deg)"}
+            >
+              <div style={{ borderRadius:2, overflow:"hidden", background:"#f5e8e8", aspectRatio:"1" }}>
+                {entryForSelected.photo
+                  ? <img src={entryForSelected.photo} alt="" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                  : <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"100%", fontSize:48 }}>📷</div>
+                }
+              </div>
+              <div style={{ marginTop:14, textAlign:"center", minHeight:32 }}>
+                <p style={{ margin:0, fontSize:14, color:"#7a5a7a", fontStyle:"italic", letterSpacing:"0.03em", lineHeight:1.6 }}>
+                  {entryForSelected.comment || "✦"}
+                </p>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10, justifyContent:"center", marginTop:24 }}>
+              <button onClick={handleShare} style={actionBtnStyle("#e8758a")}>📤 シェアする</button>
+              <button onClick={() => { setDraftPhoto(entryForSelected.photo); setDraftComment(entryForSelected.comment||""); setView("new"); }} style={actionBtnStyle("#b9a0d4")}>✏️ 編集</button>
+            </div>
+            {shareToast && (
+              <div style={{ position:"fixed", bottom:100, left:"50%", transform:"translateX(-50%)",
+                background:"rgba(60,40,60,0.85)", color:"#fff", padding:"10px 20px", borderRadius:20,
+                fontSize:13, backdropFilter:"blur(8px)", zIndex:99 }}>クリップボードにコピーしました ✓</div>
+            )}
+          </div>
+        )}
+
+        {/* NEW / EDIT VIEW */}
+        {view === "new" && (
+          <div style={{ padding:"20px 16px" }}>
+            <button onClick={() => setView("grid")} style={backBtnStyle}>← カレンダー</button>
+            <div style={{ fontSize:13, color:"#c9a0b0", textAlign:"center", marginBottom:20, letterSpacing:"0.08em" }}>
+              {formatDisplayDate(selectedDate)}
+            </div>
+            <div onClick={() => fileRef.current.click()} style={{
+              aspectRatio:"1", maxWidth:300, margin:"0 auto", borderRadius:16, overflow:"hidden",
+              border: draftPhoto?"none":"2.5px dashed rgba(200,150,180,0.5)",
+              background: draftPhoto?"transparent":"rgba(255,240,248,0.7)",
+              cursor:"pointer", position:"relative", display:"flex", alignItems:"center", justifyContent:"center",
+              transition:"all 0.2s", boxShadow: draftPhoto?"0 8px 24px rgba(180,120,160,0.2)":"none",
+            }}>
+              {draftPhoto
+                ? <img src={draftPhoto} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                : <div style={{ textAlign:"center" }}>
+                    <div style={{ fontSize:48, marginBottom:10 }}>📷</div>
+                    <div style={{ fontSize:13, color:"#c9a0b0", letterSpacing:"0.05em" }}>今日の一枚を追加</div>
+                    <div style={{ fontSize:11, color:"#d0b0c0", marginTop:4 }}>タップして写真を選択</div>
+                  </div>
+              }
+              {draftPhoto && <div style={{ position:"absolute", inset:0, background:"linear-gradient(transparent 60%, rgba(0,0,0,0.2))" }} />}
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" capture="user" style={{ display:"none" }} onChange={handleFileChange} />
+
+            <div style={{ marginTop:20, maxWidth:300, margin:"20px auto 0" }}>
+              <label style={{ fontSize:11, color:"#c9a0b0", letterSpacing:"0.12em", textTransform:"uppercase", fontWeight:700, display:"block", marginBottom:8 }}>今日のひとこと</label>
+              <textarea value={draftComment} onChange={e => setDraftComment(e.target.value)}
+                placeholder="今日の私は…" maxLength={100}
+                style={{ width:"100%", padding:"12px 14px", borderRadius:12, border:"1.5px solid rgba(200,160,190,0.3)",
+                  background:"rgba(255,250,252,0.8)", resize:"none", fontSize:14, color:"#7a5a7a",
+                  lineHeight:1.7, outline:"none", fontFamily:"inherit", boxSizing:"border-box" }} rows={3} />
+              <div style={{ fontSize:10, color:"#d0b0c0", textAlign:"right", marginTop:4 }}>{draftComment.length}/100</div>
+            </div>
+
+            <div style={{ maxWidth:300, margin:"16px auto 0" }}>
+              <button onClick={handleSave} disabled={!draftPhoto} style={{
+                width:"100%", padding:"14px",
+                background: draftPhoto?"linear-gradient(135deg, #e8758a 0%, #c97bb5 100%)":"rgba(220,200,220,0.5)",
+                color: draftPhoto?"#fff":"#bfa0bf", border:"none", borderRadius:14, fontSize:14, fontWeight:700,
+                cursor: draftPhoto?"pointer":"not-allowed", letterSpacing:"0.1em",
+                boxShadow: draftPhoto?"0 4px 16px rgba(200,100,160,0.3)":"none", transition:"all 0.2s",
+              }}>✦ この日の私を保存する</button>
+            </div>
+          </div>
+        )}
+
+        {view === "entry" && !entryForSelected && (
+          <div style={{ textAlign:"center", padding:40, color:"#c9a0b0" }}>
+            <div style={{ fontSize:40, marginBottom:12 }}>📷</div>
+            <p>まだ記録がありません</p>
+            <button onClick={() => setView("new")} style={actionBtnStyle("#e8758a")}>今日の一枚を追加</button>
+          </div>
+        )}
+
+        {/* FAB */}
+        {view === "grid" && (
+          <button onClick={() => openDay(todayKey)} style={{
+            position:"fixed", bottom:28, right:"max(16px, calc(50% - 215px + 16px))",
+            width:56, height:56, borderRadius:"50%",
+            background:"linear-gradient(135deg, #e8758a 0%, #c97bb5 100%)",
+            border:"none", cursor:"pointer", boxShadow:"0 4px 20px rgba(200,100,160,0.45)",
+            fontSize:22, display:"flex", alignItems:"center", justifyContent:"center",
+            zIndex:10, transition:"transform 0.15s, box-shadow 0.15s",
+          }}
+            onMouseEnter={e => { e.currentTarget.style.transform="scale(1.1)"; }}
+            onMouseLeave={e => { e.currentTarget.style.transform="scale(1)"; }}
+            title="今日の一枚を追加"
+          >📷</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const navBtnStyle = {
+  background:"rgba(255,240,248,0.8)", border:"1.5px solid rgba(200,160,190,0.25)",
+  borderRadius:10, width:36, height:36, fontSize:18, cursor:"pointer", color:"#c97bb5",
+  display:"flex", alignItems:"center", justifyContent:"center",
+};
+const backBtnStyle = {
+  background:"none", border:"none", cursor:"pointer", color:"#c9a0b0",
+  fontSize:12, letterSpacing:"0.08em", padding:"4px 0", marginBottom:8, display:"block", fontWeight:600,
+};
+function actionBtnStyle(color) {
+  return {
+    padding:"11px 22px", borderRadius:12,
+    background:`linear-gradient(135deg, ${color} 0%, ${color}cc 100%)`,
+    color:"#fff", border:"none", cursor:"pointer", fontSize:13, fontWeight:700,
+    letterSpacing:"0.06em", boxShadow:`0 3px 12px ${color}44`,
+  };
+}
